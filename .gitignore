@@ -136,3 +136,14 @@ conda/
 
 # Jetbrains idea folder
 .idea/
+koboldcpp_clblast
+koboldcpp_clblast_noavx2
+koboldcpp_cublas
+koboldcpp_default
+koboldcpp_failsafe
+koboldcpp_hipblas
+koboldcpp_noavx2
+koboldcpp_vulkan
+koboldcpp_vulkan_noavx2
+Makefile.local
+settings.kcpps

@@ -97,7 +97,7 @@ OBJS_FAILSAFE += ggml-alloc.o ggml-cpu-traits.o ggml-quants_failsafe.o ggml-cpu-
 ifeq ($(UNAME_S),Linux)
 	CFLAGS   += -pthread
 	CXXFLAGS += -pthread
-	LDFLAGS += -ldl
+	LDFLAGS += -ldl -lstdc++fs
 endif
 
 ifeq ($(UNAME_S),Darwin)

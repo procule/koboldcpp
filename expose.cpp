@@ -325,19 +325,25 @@ extern "C"
         {
             logprob_item itm;
             itm.option_count = last_logprob_toppicks[i].tokenid.size();
-            itm.selected_token = last_logprob_toppicks[i].selected_token.c_str();
+            itm.selected_token = new char[last_logprob_toppicks[i].selected_token.size() + 1];
+            std::strcpy(const_cast<char *>(itm.selected_token), last_logprob_toppicks[i].selected_token.c_str());
             itm.selected_logprob = last_logprob_toppicks[i].selected_logprob;
-            itm.logprobs = last_logprob_toppicks[i].logprobs.data();
-            for(int j=0;j<itm.option_count && j<logprobs_max;++j)
+            //itm.logprobs = last_logprob_toppicks[i].logprobs.data();
+            itm.logprobs = new float[itm.option_count];
+            std::copy(last_logprob_toppicks[i].logprobs.begin(), last_logprob_toppicks[i].logprobs.end(), itm.logprobs);
+
+            itm.tokens = new const char *[itm.option_count];
+            for(int j=0;j<itm.option_count;++j)
             {
                 itm.tokens[j] = last_logprob_toppicks[i].tokens[j].c_str();
             }
-            last_logprob_items.push_back(itm);
+            last_logprob_items.push_back(std::move(itm));
         }
         output.count = last_logprob_items.size();
-        output.logprob_items = last_logprob_items.data();
+        output.logprob_items = new logprob_item[output.count];
+        for (size_t i = 0; i < output.count; ++i) {
+            output.logprob_items[i] = last_logprob_items[i];  // Deep copy
+        }
         return output;
     }
-
-
 }

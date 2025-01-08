@@ -1,9 +1,11 @@
 #pragma once
 #include <cstdint>
+#include <string>
+#include <vector>
 
 const int tensor_split_max = 16;
 const int images_max = 4;
-const int logprobs_max = 5;
+// const int logprobs_max = 5;    // No longer required
 
 // match kobold's sampler list and order
 enum samplers
@@ -130,9 +132,9 @@ struct token_count_outputs
 
 struct logprob_item {
     int option_count;
-    const char * selected_token;
+    const char * selected_token = nullptr;
     float selected_logprob;
-    const char * tokens[logprobs_max];
+    const char ** tokens = nullptr;
     float * logprobs = nullptr;
 };
 struct last_logprobs_outputs {

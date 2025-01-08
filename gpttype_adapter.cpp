@@ -866,7 +866,6 @@ llama_token sample_token(llama_token_data_array * candidates, std::mt19937 & rng
     sample_softmax(candidates);
     std::vector<float> probs;
     probs.reserve(candidates->size);
-    TopPicksData newpick;
 
     for (size_t i = 0; i < candidates->size; ++i) {
         probs.push_back(candidates->data[i].p);
@@ -875,29 +874,48 @@ llama_token sample_token(llama_token_data_array * candidates, std::mt19937 & rng
     std::discrete_distribution<> dist(probs.begin(), probs.end());
     int idx = dist(rng);
 
-    newpick.selected_token = FileFormatTokenizeID(candidates->data[idx].id, file_format, true);
-    float rp1 = (candidates->data[idx].p<=0.0001?0.0001f:candidates->data[idx].p);
+    // Populate token metadata with alternative candidates
+    TopPicksData toppick;
+    const llama_token_data & selected_candidate = candidates->data[idx];
+
+    toppick.selected_token = FileFormatTokenizeID(selected_candidate.id, file_format, true);
+    float rp1 = std::max(selected_candidate.p, 0.0001f);
     float sprob = logf(rp1);
-    sprob = (sprob > 999.0f?999.0f:sprob);
-    sprob = (sprob < -999.0f?-999.0f:sprob);
-    newpick.selected_logprob = sprob;
-    newpick.selected_probability = candidates->data[idx].p;
-    newpick.selected_tokenid = candidates->data[idx].id;
-    for (size_t i = 0; (i < candidates->size && i<logprobs_max); ++i)
-    {
-        newpick.tokens.push_back(FileFormatTokenizeID(candidates->data[i].id, file_format, true));
-        float rp2 = (candidates->data[i].p<=0.0001?0.0001f:candidates->data[i].p);
+    sprob = std::clamp(sprob, -999.0f, 999.0f);
+    toppick.selected_logprob = sprob;
+    toppick.selected_probability = selected_candidate.p;
+    toppick.selected_tokenid = selected_candidate.id;
+
+    // Sort candidates by probability (using indices)
+    std::vector<size_t> sorted_indices(candidates->size);
+    std::iota(sorted_indices.begin(), sorted_indices.end(), 0);
+    std::sort(sorted_indices.begin(), sorted_indices.end(), [&](size_t a, size_t b) {
+        return candidates->data[a].p > candidates->data[b].p;  // Sort by descending probability
+    });
+
+    // Add candidates until cumulative probability threshold is met
+    float cumulative_prob = 0.0f;
+    float threshold       = 0.98;       // Hardcoded threshold of 0.98 based on simulations
+    for (size_t i : sorted_indices) {
+        const llama_token_data & candidate = candidates->data[i];
+
+        toppick.tokens.push_back(FileFormatTokenizeID(candidate.id, file_format, true));
+        float rp2  = std::max(candidate.p, 0.0001f);
         float prob = logf(rp2);
-        prob = (prob > 999.0f?999.0f:prob);
-        prob = (prob < -999.0f?-999.0f:prob);
-        newpick.logprobs.push_back(prob);
-        newpick.p.push_back(candidates->data[i].p);
-        newpick.tokenid.push_back(candidates->data[i].id);
+        prob = std::clamp(prob, -999.0f, 999.0f);
+        toppick.logprobs.push_back(prob);
+        toppick.p.push_back(candidate.p);
+        toppick.tokenid.push_back(candidate.id);
+
+        cumulative_prob += candidate.p;
+        if (cumulative_prob >= threshold) {
+            break;
+        }
     }
 
-    top_picks_history.push_back(newpick);
+    top_picks_history.push_back(toppick);
 
-    llama_token result = candidates->data[idx].id;
+    llama_token result = selected_candidate.id;
     return result;
 }
 
@@ -1638,19 +1656,21 @@ void sample_grammar(FileFormat file_format, int32_t n_vocab, llama_token_data_ar
 
 }
 
-int SampleLogits(const float * logits, int n_ctx, int n_vocab, int rep_pen_range, float rep_pen, float rep_pen_slope, float presence_penalty, float top_k, float top_a, float top_p, float min_p, float typical_p, float tfs, float temp, std::mt19937 & rng,
-int mirostat, float mirostat_tau, float mirostat_eta, float dry_multiplier, float dry_base, int dry_allowed_length, int dry_penalty_last_n, float xtc_threshold, float xtc_probability,
-const std::vector<samplers> & sampler_order, llama_grammar * grammar, float dynatemp_range, float dynatemp_exponent, float smoothing_factor)
+int SampleLogits(const float * logits, int n_ctx, int n_vocab, int rep_pen_range, float rep_pen, float rep_pen_slope,
+                 float presence_penalty, float top_k, float top_a, float top_p, float min_p, float typical_p, float tfs,
+                 float temp, std::mt19937 & rng, int mirostat, float mirostat_tau, float mirostat_eta,
+                 float dry_multiplier, float dry_base, int dry_allowed_length, int dry_penalty_last_n,
+                 float xtc_threshold, float xtc_probability, const std::vector<samplers> & sampler_order,
+                 llama_grammar * grammar, float dynatemp_range, float dynatemp_exponent, float smoothing_factor)
 {
     int id = 0;
     std::vector<llama_token_data> candidates;
     candidates.reserve(n_vocab);
     for (llama_token token_id = 0; token_id < n_vocab; token_id++) {
-        candidates.emplace_back(llama_token_data{token_id, logits[token_id], 0.0f});
+        candidates.emplace_back(llama_token_data{ token_id, logits[token_id], 0.0f });
     }
 
-    for(int i=0;i<logit_biases.size();++i)
-    {
+    for (int i = 0; i < logit_biases.size(); ++i) {
         auto & itm = logit_biases[i];
         candidates[itm.token_id].logit += itm.bias;
     }
@@ -1662,32 +1682,26 @@ const std::vector<samplers> & sampler_order, llama_grammar * grammar, float dyna
     }
 
     //dry always first as logits cannot be resorted
-    sample_dry(n_ctx, dry_penalty_last_n, dry_multiplier, dry_base, dry_allowed_length, dry_sequence_breakers, &candidates_p);
+    sample_dry(n_ctx, dry_penalty_last_n, dry_multiplier, dry_base, dry_allowed_length, dry_sequence_breakers,
+               &candidates_p);
 
     //prefilter to top 3k tokens for improved speed
     sample_top_k(&candidates_p, 3000);
 
-    if (mirostat == 1 || mirostat == 2)
-    {
+    if (mirostat == 1 || mirostat == 2) {
         static float mirostat_mu = 2.0f * mirostat_tau;
-        const int mirostat_m = 100;
+        const int    mirostat_m  = 100;
         sample_rep_pen(n_ctx, rep_pen_range, rep_pen, rep_pen_slope, presence_penalty, &candidates_p);
         sample_temperature(&candidates_p, temp, smoothing_factor);
-        if (mirostat == 1)
-        {
-            id = sample_token_mirostat(n_vocab, &candidates_p, rng, mirostat_tau, mirostat_eta, mirostat_m, &mirostat_mu);
-        }
-        else
-        {
+        if (mirostat == 1) {
+            id = sample_token_mirostat(n_vocab, &candidates_p, rng, mirostat_tau, mirostat_eta, mirostat_m,
+                                       &mirostat_mu);
+        } else {
             id = sample_token_mirostat_v2(&candidates_p, rng, mirostat_tau, mirostat_eta, &mirostat_mu);
         }
-    }
-    else
-    {
-        for (int i = 0; i < sampler_order.size(); i++)
-        {
-            switch (sampler_order[i])
-            {
+    } else {
+        for (int i = 0; i < sampler_order.size(); i++) {
+            switch (sampler_order[i]) {
                 case KCPP_SAMPLER_TOP_K:
                     sample_top_k(&candidates_p, top_k);
                     break;
@@ -1705,18 +1719,15 @@ const std::vector<samplers> & sampler_order, llama_grammar * grammar, float dyna
                     sampler_typical(&candidates_p, typical_p, 1);
                     break;
                 case KCPP_SAMPLER_TEMP:
-                    if (dynatemp_range>0)
-                    {
+                    if (dynatemp_range > 0) {
                         float dynatemp_min = temp - dynatemp_range;
                         float dynatemp_max = temp + dynatemp_range;
                         //do not allow negative values
-                        dynatemp_min = dynatemp_min<0?0:dynatemp_min;
-                        dynatemp_max = dynatemp_max<0?0:dynatemp_max;
-                        dynatemp_exponent = dynatemp_exponent<0?0:dynatemp_exponent;
+                        dynatemp_min       = dynatemp_min < 0 ? 0 : dynatemp_min;
+                        dynatemp_max       = dynatemp_max < 0 ? 0 : dynatemp_max;
+                        dynatemp_exponent  = dynatemp_exponent < 0 ? 0 : dynatemp_exponent;
                         sample_entropy(&candidates_p, dynatemp_min, dynatemp_max, dynatemp_exponent, smoothing_factor);
-                    }
-                    else
-                    {
+                    } else {
                         sample_temperature(&candidates_p, temp, smoothing_factor);
                     }
                     break;
@@ -1724,7 +1735,7 @@ const std::vector<samplers> & sampler_order, llama_grammar * grammar, float dyna
                     sample_rep_pen(n_ctx, rep_pen_range, rep_pen, rep_pen_slope, presence_penalty, &candidates_p);
                     break;
                 default:
-                    printf("\nSampleLogits: Unknown Sampler : %d",sampler_order[i]);
+                    printf("\nSampleLogits: Unknown Sampler : %d", sampler_order[i]);
                     break;
             }
         }
@@ -1735,7 +1746,6 @@ const std::vector<samplers> & sampler_order, llama_grammar * grammar, float dyna
 
     return id;
 }
-
 
 static void grammar_accept_token(FileFormat file_format, int32_t n_vocab, struct llama_grammar * grammar, llama_token token)
 {

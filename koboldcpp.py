@@ -34,7 +34,7 @@ tensor_split_max = 16
 images_max = 4
 bias_min_value = -100.0
 bias_max_value = 100.0
-logprobs_max = 5
+# logprobs_max = 20
 default_draft_amount = 8
 
 # abuse prevention
@@ -124,12 +124,14 @@ class token_count_outputs(ctypes.Structure):
                 ("ids", ctypes.POINTER(ctypes.c_int))]
 
 # returns top 5 logprobs per token
+
 class logprob_item(ctypes.Structure):
-     _fields_ = [("option_count", ctypes.c_int),
+    _fields_ = [("option_count", ctypes.c_int),
                 ("selected_token", ctypes.c_char_p),
                 ("selected_logprob", ctypes.c_float),
-                ("tokens", ctypes.c_char_p * logprobs_max),
+                ("tokens", ctypes.POINTER(ctypes.c_char_p)),
                 ("logprobs", ctypes.POINTER(ctypes.c_float))]
+
 class last_logprobs_outputs(ctypes.Structure):
     _fields_ = [("count", ctypes.c_int),
                 ("logprob_items", ctypes.POINTER(logprob_item))]
@@ -1510,7 +1512,7 @@ def parse_last_logprobs(lastlogprobs):
         logprobsdict['text_offset'].append(text_offset_counter)
         text_offset_counter += len(toptoken)
         tops = {}
-        for j in range(min(logprob_item.option_count,logprobs_max)):
+        for j in range(logprob_item.option_count):
             tl_item = {}
             tl_item['logprob'] = logprob_item.logprobs[j]
             tokstr = ctypes.string_at(logprob_item.tokens[j]).decode("UTF-8","ignore")
