@@ -328,7 +328,6 @@ extern "C"
             itm.selected_token = new char[last_logprob_toppicks[i].selected_token.size() + 1];
             std::strcpy(const_cast<char *>(itm.selected_token), last_logprob_toppicks[i].selected_token.c_str());
             itm.selected_logprob = last_logprob_toppicks[i].selected_logprob;
-            //itm.logprobs = last_logprob_toppicks[i].logprobs.data();
             itm.logprobs = new float[itm.option_count];
             std::copy(last_logprob_toppicks[i].logprobs.begin(), last_logprob_toppicks[i].logprobs.end(), itm.logprobs);
 
